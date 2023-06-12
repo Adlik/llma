@@ -1,1 +1,1 @@
-# llm_inference_server
+# large language model accelerator
