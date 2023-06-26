@@ -41,7 +41,7 @@ Infer with the python script.
 In the LLMA/examples/llama-7b directory, run the command:
 
 ```sh
-python3 client.py  
+python3 client.py -u $url 
 ```
 
 The results will be as follows:
