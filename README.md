@@ -20,6 +20,24 @@ LLMA supports model multiple instances, model concurrent execution, dynamic batc
 
 For the large language modelLLMA such as GPT3-175B, LLMA can divide it into multiple smaller files and execute each file on a separate hardware in the server.
 
+## TUTORIALS
 
+This example demonstrates how to use LLAM to deploy LLAMA-7B on Cloudblazer Yunsui t20.
 
+### Setup
+
+In a conda env with pytorch available, run:
+
+```sh
+cd LLMA/examples/llama-7b
+pip install -r requirements.txt
+```
+### Deploy LLAMA-7B 
+
+In the deployment environment, run:
+
+```sh
+cd LLMA/examples/llama-7b
+bash ./run.sh --ckpt_dir $CKPT_DIR --tokenizer_path $TOKENIZER_PATH
+```sh
 
