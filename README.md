@@ -66,6 +66,6 @@ The results will be as follows:
 }
 ```
 
-##License
+## License
 
 Apache License 2.0
