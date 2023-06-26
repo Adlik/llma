@@ -10,9 +10,9 @@ LLMA is an end-to-end inference service framework, which can help developers eff
 
 ### 1.1 Support popular deep learning frameworks
 
-LLMA supports almost training and inference frameworks, such as: TensorFLow, TensorRT, PyTorch, OpenVino, ONNX, etc. At the same time, LLMA provides an API that allows adding custom backends.
+LLMA supports almost training and inference frameworks, such as: TensorFlow, TensorRT, PyTorch, ONNX, etc. At the same time, LLMA provides an API that allows adding custom backends.
 
-### 1.2 High performance model inferecne
+### 1.2 High performance model inference
 
 LLMA supports model multiple instances, model concurrent execution, dynamic batch to maximize throughput and utilization. At the same time, LLMA supports model scheduling and can efficiently allocate hardware resources by grouping models from different frameworks.
 
