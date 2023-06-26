@@ -39,5 +39,5 @@ In the deployment environment, run:
 ```sh
 cd LLMA/examples/llama-7b
 bash ./run.sh --ckpt_dir $CKPT_DIR --tokenizer_path $TOKENIZER_PATH
-```sh
+```
 
