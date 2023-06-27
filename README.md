@@ -10,11 +10,11 @@ LLMA is an end-to-end inference service framework, which can help developers eff
 
 ### 1.1 Support large language model inference
 
-For the large language model such as LLAMA-7B, LLMA can deploy it on a seperate hardware in the server and do inference with client requests. Specifically, the client sends an inference request and LLMA receives the request and returns the inference result to the client.
+For the large language model such as LLaMA-7B, LLMA can deploy it on a seperate hardware in the server and do inference with client requests. Specifically, the client sends an inference request and LLMA receives the request and returns the inference result to the client.
 
 ## TUTORIALS
 
-This example demonstrates how to use LLAM to deploy LLAMA-7B on Cloudblazer Yunsui t20.
+This example demonstrates how to use LLAM to deploy LLaMA-7B on Cloudblazer Yunsui t20.
 
 ### Setup
 
@@ -24,7 +24,7 @@ In a conda env with pytorch available, run:
 cd LLMA/examples/llama-7b
 pip install -r requirements.txt
 ```
-### Deploy LLAMA-7B 
+### Deploy LLaMA-7B 
 
 In the deployment environment, run:
 
@@ -51,7 +51,7 @@ The results will be as follows:
   "code": 1, 
   "error": "", 
   "finish_reason": "null", 
-  "model_name": "llama-7b", 
+  "model_name": "LLaMA-7B", 
   "output": "I believe the meaning of life is to live to the fullest extent to help others and to grow spiritually developed through relationships and the expression of gratitude. It's all about who you're surrounded by and the ones who make you smile. I'm a hopeless"
 }
 ```
