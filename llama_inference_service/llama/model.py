@@ -4,17 +4,30 @@
 from typing import Optional, Tuple
 from dataclasses import dataclass
 import math
-
+import sys
+import os
 import torch
 from torch import nn
 import torch.nn.functional as F
 
-import fairscale.nn.model_parallel.initialize as fs_init
-from fairscale.nn.model_parallel.layers import (
+import model_parallel.initialize as fs_init
+from model_parallel.layers import (
     ParallelEmbedding,
     RowParallelLinear,
     ColumnParallelLinear,
 )
+from llama import is_torch_gcu_available
+
+torch.autograd.set_detect_anomaly(True)
+
+if is_torch_gcu_available():
+    import torch_gcu
+    import torch_gcu.distributed as dist
+    local_rank = int(os.environ['LOCAL_RANK']) if 'LOCAL_RANK' in os.environ else dist.get_rank()
+    #gcu_device = torch_gcu.gcu_device(local_rank * int(os.getenv("LEO_CLUSTER_NUM", '1')))
+    gcu_device = torch_gcu.gcu_device(local_rank)
+else:
+    import torch as torch_gcu
 
 
 @dataclass
@@ -24,7 +37,7 @@ class ModelArgs:
     n_heads: int = 8
     vocab_size: int = -1  # defined later by tokenizer
     multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
-    norm_eps: float = 1e-5
+    norm_eps: float = 1e-8
 
     max_batch_size: int = 32
     max_seq_len: int = 2048
@@ -34,7 +47,7 @@ class RMSNorm(torch.nn.Module):
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
         self.eps = eps
-        self.weight = nn.Parameter(torch.ones(dim))
+        self.weight = nn.Parameter(torch.ones(dim),requires_grad=False)
 
     def _norm(self, x):
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
@@ -65,11 +78,38 @@ def apply_rotary_emb(
     xk: torch.Tensor,
     freqs_cis: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    xq=xq.cpu()
+    xk=xk.cpu()
     xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
     xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
     freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
     xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
+    xq_out = xq_out.type_as(xq).to(gcu_device)
     xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+    xk_out = xk_out.type_as(xk).to(gcu_device)
+    return xq_out, xk_out
+
+
+def apply_rotary_emb_gcu(
+    xq: torch.Tensor,
+    xk: torch.Tensor,
+    freqs_cis_real: torch.Tensor,
+    freqs_cis_imag: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    xq_ = xq.float().reshape(*xq.shape[:-1], -1, 2)
+    xq_real = xq_[:, :, :, :, 0]
+    xq_imag = xq_[:, :, :, :, 1]
+    xk_ = xk.float().reshape(*xk.shape[:-1], -1, 2)
+    xk_real = xk_[:, :, :, :, 0]
+    xk_imag = xk_[:, :, :, :, 1]
+    freqs_cis_real = reshape_for_broadcast(freqs_cis_real, xq_real)
+    freqs_cis_imag = reshape_for_broadcast(freqs_cis_imag, xq_imag)
+    xq_out_real = xq_real * freqs_cis_real - xq_imag * freqs_cis_imag
+    xq_out_imag = xq_imag * freqs_cis_real + xq_real * freqs_cis_imag
+    xk_out_real = xk_real * freqs_cis_real - xk_imag * freqs_cis_imag
+    xk_out_imag = xk_imag * freqs_cis_real + xk_real * freqs_cis_imag
+    xq_out = torch.cat([xq_out_real.unsqueeze(4), xq_out_imag.unsqueeze(4)], dim=4).flatten(3)
+    xk_out = torch.cat([xk_out_real.unsqueeze(4), xk_out_imag.unsqueeze(4)], dim=4).flatten(3)
     return xq_out.type_as(xq), xk_out.type_as(xk)
 
 
@@ -108,32 +148,37 @@ class Attention(nn.Module):
             input_is_parallel=True,
             init_method=lambda x: x,
         )
+        if not is_torch_gcu_available():
+            self.cache_k = torch.zeros((args.max_batch_size, args.max_seq_len, self.n_local_heads, self.head_dim)).cuda()
+            self.cache_v = torch.zeros((args.max_batch_size, args.max_seq_len, self.n_local_heads, self.head_dim)).cuda()
+        else:
+            self.cache_k = torch.zeros((args.max_batch_size, args.max_seq_len, self.n_local_heads, self.head_dim),device="cpu")
+            self.cache_v = torch.zeros((args.max_batch_size, args.max_seq_len, self.n_local_heads, self.head_dim),device="cpu")
 
-        self.cache_k = torch.zeros(
-            (args.max_batch_size, args.max_seq_len, self.n_local_heads, self.head_dim)
-        ).cuda()
-        self.cache_v = torch.zeros(
-            (args.max_batch_size, args.max_seq_len, self.n_local_heads, self.head_dim)
-        ).cuda()
+            self.cache_k = self.cache_k.to(gcu_device)
+            self.cache_v = self.cache_v.to(gcu_device)
 
-    def forward(self, x: torch.Tensor, start_pos: int, freqs_cis: torch.Tensor, mask: Optional[torch.Tensor]):
+    def forward(self, x: torch.Tensor, start_pos: int, freqs_cis_real: torch.Tensor,
+                freqs_cis_imag: torch.Tensor, mask: Optional[torch.Tensor]):
         bsz, seqlen, _ = x.shape
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-
         xq = xq.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         xk = xk.view(bsz, seqlen, self.n_local_heads, self.head_dim)
         xv = xv.view(bsz, seqlen, self.n_local_heads, self.head_dim)
 
-        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+        xq, xk = apply_rotary_emb_gcu(xq, xk, freqs_cis_real, freqs_cis_imag)
 
-        self.cache_k = self.cache_k.to(xq)
-        self.cache_v = self.cache_v.to(xq)
+        if start_pos == 0:
+            self.cache_k = self.cache_k.to(xq)
+            self.cache_v = self.cache_v.to(xq)
+            self.cache_k[:bsz, -seqlen:] = xk
+            self.cache_v[:bsz, -seqlen:] = xv
+        else :
+            self.cache_k= torch.cat([self.cache_k[:bsz,  1:],xk],dim=1)
+            self.cache_v= torch.cat([self.cache_v[:bsz,  1:],xv],dim=1)
 
-        self.cache_k[:bsz, start_pos : start_pos + seqlen] = xk
-        self.cache_v[:bsz, start_pos : start_pos + seqlen] = xv
-
-        keys = self.cache_k[:bsz, : start_pos + seqlen]
-        values = self.cache_v[:bsz, : start_pos + seqlen]
+        keys = self.cache_k[:bsz, :]
+        values = self.cache_v[:bsz, :]
 
         xq = xq.transpose(1, 2)
         keys = keys.transpose(1, 2)
@@ -146,7 +191,6 @@ class Attention(nn.Module):
         output = output.transpose(
             1, 2
         ).contiguous().view(bsz, seqlen, -1)
-
         return self.wo(output)
 
 
@@ -189,8 +233,10 @@ class TransformerBlock(nn.Module):
         self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps)
         self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
 
-    def forward(self, x: torch.Tensor, start_pos: int, freqs_cis: torch.Tensor, mask: Optional[torch.Tensor]):
-        h = x + self.attention.forward(self.attention_norm(x), start_pos, freqs_cis, mask)
+    def forward(self, x: torch.Tensor, start_pos: int, freqs_cis_real: torch.Tensor,
+                freqs_cis_imag: torch.Tensor, mask: Optional[torch.Tensor]):
+        h = x + self.attention.forward(self.attention_norm(x), start_pos,
+                                       freqs_cis_real, freqs_cis_imag, mask)
         out = h + self.feed_forward.forward(self.ffn_norm(h))
         return out
 
@@ -218,21 +264,17 @@ class Transformer(nn.Module):
         self.freqs_cis = precompute_freqs_cis(
             self.params.dim // self.params.n_heads, self.params.max_seq_len * 2
         )
+        self.freqs_cis_real = self.freqs_cis.real
+        self.freqs_cis_imag = self.freqs_cis.imag
 
-    @torch.inference_mode()
-    def forward(self, tokens: torch.Tensor, start_pos: int):
+    def forward(self, tokens: torch.Tensor, start_pos: int, mask: torch.Tensor):
         _bsz, seqlen = tokens.shape
         h = self.tok_embeddings(tokens)
-        self.freqs_cis = self.freqs_cis.to(h.device)
-        freqs_cis = self.freqs_cis[start_pos : start_pos + seqlen]
+        freqs_cis_real = self.freqs_cis_real[start_pos : start_pos + seqlen].to(gcu_device)
+        freqs_cis_imag = self.freqs_cis_imag[start_pos : start_pos + seqlen].to(gcu_device)
+        for layer_id, layer in enumerate(self.layers):
+            h = layer(h, start_pos, freqs_cis_real, freqs_cis_imag, mask)
 
-        mask = None
-        if seqlen > 1:
-            mask = torch.full((1, 1, seqlen, seqlen), float("-inf"), device=tokens.device)
-            mask = torch.triu(mask, diagonal=start_pos + 1).type_as(h)
-
-        for layer in self.layers:
-            h = layer(h, start_pos, freqs_cis, mask)
         h = self.norm(h)
         output = self.output(h[:, -1, :])  # only compute last logits
         return output.float()
