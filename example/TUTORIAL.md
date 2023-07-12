@@ -1,37 +1,52 @@
 # TUTORIAL
 
-This example demonstrates how to use LLAM to deploy LLaMA-7B on Cloudblazer Yunsui t20.
+## Preparation
 
-## Setup
+### Pull the docker image
 
-In a conda env with pytorch available, run:
+In the server with Yunsui t20, run:
+
+```sh
+docker pull artifact.enflame.cn/enflame_docker_images/ubuntu/qic_ubuntu_1804_gcc7:latest
+```
+
+### Load LLaMA-7B
+
+```sh
+cd LLMA && \
+mkdir tmp/llama-7b/7B && \
+cd tmp/llama-7b/7B && \
+wget https://llama-7b.oss-cn-beijing.aliyuncs.com/7B/ && \
+cd .. && \
+wget https://llama-7b.oss-cn-beijing.aliyuncs.com/tokenizer.model
+```
+
+### Run the image
+
+Run the following command:
 
 ```sh
 cd LLMA
-
-pip install -e .
+docker run -it -v $PWD:/home/join/model --privileged -p 7999:8080 artifact.enflame.cn/enflame_docker_images/ubuntu/qic_ubuntu_1804_gcc7:latest bash
 ```
 
 ## Deploy LLaMA-7B
 
-In the deployment environment, run:
+In the docker container, run:
 
 ```sh
-cd LLMA/examples/llama-7b
-
-bash ./run.sh $CKPT_DIR $TOKENIZER_PATH
+cd /home/join/model/example/llama-7b
+bash ./run.sh ../tmp/llama-7b/7B/ ../tmp/llama-7b/tokenizer.model
 ```
 
 ## Do inference
-
-Examples of model inference are as follows:
 
 Infer with the python script.
 
 In the LLMA/examples/llama-7b directory, run the command:
 
 ```sh
-python3 client.py -u $url 
+python3 client.py -u 'http://localhost:7999/chat' -p 'I believe the meaning of life'
 ```
 
 The results will be as follows:
