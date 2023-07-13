@@ -1,6 +1,5 @@
 # Large Language Model Accelerator
 
-[![Bors enabled](https://bors.tech/images/badge_small.svg)](https://app.bors.tech/repositories/65566)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 LLMA is an end-to-end optimizing framework for large language models.
@@ -23,7 +22,7 @@ LLMA supports several optimizing technologies like model fine-tuning and model q
 
 ## Getting Started
 
-The following tutorial demonstrates how to use LLAM to deploy LLaMA-7B.
+This example demonstrates how to use LLAM to deploy LLaMA-7B on Cloudblazer Yunsui t20.
 
 - [Tutorial](example/TUTORIAL.md)
 

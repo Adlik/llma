@@ -6,16 +6,14 @@ import json
 import requests
 
 
-MODEL_NAME = 'LLaMA-7B'
-PROMPT = 'I believe the meaning of life is'
-info = {
-    "instruction": PROMPT,
-    "model": MODEL_NAME
-}
-headers = {"Content-Type": "application/json"}
-
-
 def get_response():
+    model_name = 'LLaMA-7B'
+    prompt = FLAGS.prompt
+    info = {
+            "instruction": prompt,
+            "model": model_name
+            }
+    headers = {"Content-Type": "application/json"}
     response = requests.post(FLAGS.url, json=json.dumps(info), headers=headers)
     if response.status_code == 200:
         for chunk in response.iter_content(chunk_size=1):
@@ -28,5 +26,6 @@ def get_response():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-u', '--url', type=str, required=False)
+    parser.add_argument('-p', '--prompt', type=str, required=False)
     FLAGS = parser.parse_args()
     get_response()

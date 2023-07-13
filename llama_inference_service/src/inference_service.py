@@ -36,7 +36,7 @@ def chat():
         model_name = data['model']
         generator = load(FLAGS.ckpt_dir, FLAGS.tokenizer_path, local_rank, world_size, 512, 1)
         with torch.no_grad():
-            results = generator.generate(prompt[0], max_gen_len=50, temperature=0.8, top_p=0.95)
+            results, _ = generator.generate(prompt[0], max_gen_len=50, temperature=0.8, top_p=0.95)
         response = make_response(jsonify(construct_response(1, "", model_name, results[0])))
         return response
 
